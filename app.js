@@ -1,12 +1,10 @@
 // ---- Config ----
 const STATUS_OPTIONS = [
   { id: "available", label: "Available", color: "#22c55e" },
-  { id: "no_msg", label: "Busy - NO MSG", color: "#ef4444" },
-  { id: "at_work", label: "At Work", color: "#f59e0b" },
-  { id: "at_home", label: "At Home", color: "#a855f7" },
+  { id: "no_msg", label: "No msg", color: "#ef4444" },
 ];
 
-const LS_KEYS = { pin: "bs_pin", identity: "bs_identity" };
+const LS_KEYS = { pin: "msgme_pin", identity: "msgme_identity" };
 
 // ---- Helpers ----
 async function sha256Hex(text) {
@@ -31,6 +29,8 @@ let appPathHash = null;
 let myIdentity = null;
 let statusListenerRef = null;
 let messageListenerRef = null;
+let seenListenerRef = null;
+let lastMineMeta = null;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -51,7 +51,7 @@ async function handlePinSubmit() {
 }
 
 async function activatePin(pin, persist) {
-  appPathHash = await sha256Hex("buddystatus_v1_" + pin);
+  appPathHash = await sha256Hex("msgme_v1_" + pin);
   db = firebase.database();
   if (persist) localStorage.setItem(LS_KEYS.pin, pin);
   proceedAfterPin();
@@ -75,12 +75,6 @@ document.querySelectorAll(".identity-btn").forEach(btn => {
   });
 });
 
-$("#switch-identity").addEventListener("click", () => {
-  detachListeners();
-  localStorage.removeItem(LS_KEYS.identity);
-  showScreen("#identity-screen");
-});
-
 $("#logout-btn").addEventListener("click", () => {
   detachListeners();
   localStorage.removeItem(LS_KEYS.identity);
@@ -96,11 +90,12 @@ $("#logout-btn").addEventListener("click", () => {
 // ---- Main app ----
 function resetChatThread() {
   $("#chat-thread").innerHTML = '<p class="chat-empty" id="chat-empty">No messages yet this session.</p>';
+  lastMineMeta = null;
 }
 
 function startApp(identity) {
   myIdentity = identity;
-  $("#me-label").textContent = "You: Person " + identity;
+  $("#me-tag").textContent = "Person " + identity;
   resetChatThread();
   buildStatusOptions();
   attachListeners();
@@ -112,8 +107,8 @@ function buildStatusOptions() {
   container.innerHTML = "";
   STATUS_OPTIONS.forEach(opt => {
     const btn = document.createElement("button");
-    btn.className = "status-option active";
-    btn.style.color = opt.color;
+    btn.className = "status-option";
+    btn.style.setProperty("--opt-color", opt.color);
     btn.textContent = opt.label;
     btn.dataset.id = opt.id;
     btn.addEventListener("click", () => setMyStatus(opt.id));
@@ -157,11 +152,22 @@ function attachListeners() {
     const v = snap.val();
     if (v && v.text) showIncomingMessage(v);
   });
+
+  // partner has seen my last message, live
+  seenListenerRef = db.ref(`apps/${appPathHash}/seen/${mine}`);
+  seenListenerRef.on("value", snap => {
+    const v = snap.val();
+    if (v && v.ts && lastMineMeta) {
+      const clock = new Date(v.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      lastMineMeta.textContent = clock + " · Seen";
+    }
+  });
 }
 
 function detachListeners() {
   if (statusListenerRef) statusListenerRef.off();
   if (messageListenerRef) messageListenerRef.off();
+  if (seenListenerRef) seenListenerRef.off();
 }
 
 function renderPartnerStatus(v) {
@@ -197,14 +203,19 @@ function appendChatBubble(text, who, ts) {
   const p = document.createElement("p");
   p.className = "chat-text";
   p.textContent = text;
-  const time = document.createElement("span");
-  time.className = "chat-time";
-  time.textContent = new Date(ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const meta = document.createElement("span");
+  meta.className = "chat-meta";
+  const clock = new Date(ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  meta.textContent = who === "me" ? (clock + " · Sent") : (clock + " · sent " + timeAgo(ts));
   bubble.appendChild(p);
-  bubble.appendChild(time);
+  bubble.appendChild(meta);
   thread.appendChild(bubble);
   thread.scrollTop = thread.scrollHeight;
+  return { bubble, meta };
 }
+
+// ---- Clearing chat ----
+$("#clear-chat").addEventListener("click", resetChatThread);
 
 // ---- Sending messages ----
 $("#msg-send").addEventListener("click", () => {
@@ -216,7 +227,8 @@ $("#msg-send").addEventListener("click", () => {
     from: myIdentity,
     ts: firebase.database.ServerValue.TIMESTAMP,
   });
-  appendChatBubble(text, "me", Date.now());
+  const { meta } = appendChatBubble(text, "me", Date.now());
+  lastMineMeta = meta;
   $("#msg-input").value = "";
 });
 
@@ -226,6 +238,10 @@ function showIncomingMessage(v) {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   // not stored server-side: clear it from the database now that it's been shown
   db.ref(`apps/${appPathHash}/messages/${myIdentity}`).remove();
+  // let the sender know their message has been seen
+  db.ref(`apps/${appPathHash}/seen/${myIdentity}`).set({
+    ts: firebase.database.ServerValue.TIMESTAMP,
+  });
 }
 
 // ---- Boot ----

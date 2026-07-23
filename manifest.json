@@ -1,6 +1,6 @@
 {
-  "name": "BuddyStatus",
-  "short_name": "BuddyStatus",
+  "name": "MsgMe",
+  "short_name": "MsgMe",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0b0f14",

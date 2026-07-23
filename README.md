@@ -1,4 +1,4 @@
-# BuddyStatus
+# MsgMe
 
 A tiny 2-person status + emergency-message web app. No build step — plain HTML/CSS/JS,
 hosted for free on GitHub Pages. Live sync is powered by Firebase Realtime Database (free tier).
@@ -8,7 +8,7 @@ Messages are not stored: once the recipient taps "Got it", the message is delete
 ## 1. Create a free Firebase project
 
 1. Go to the Firebase console and sign in with a Google account, then create a new project
-   (any name, e.g. "buddystatus"). Google Analytics is not needed — you can skip it.
+   (any name, e.g. "msgme"). Google Analytics is not needed — you can skip it.
 2. In the project, open **Build -> Realtime Database** and click **Create Database**.
    - Choose any region.
    - Start in **locked mode** (we'll set custom rules in step 3).
@@ -43,10 +43,10 @@ you copied above.
 ## 3. Put it on GitHub Pages
 
 ```
-cd buddystatus_web
+cd msgme_web
 git init
 git add .
-git commit -m "Initial BuddyStatus app"
+git commit -m "Initial MsgMe app"
 git branch -M main
 git remote add origin https://github.com/<your-username>/<repo-name>.git
 git push -u origin main
@@ -70,5 +70,5 @@ Your app will be live at `https://<your-username>.github.io/<repo-name>/`.
   open, the other person won't see your message/status change until they open it.
 - If your partner's status panel keeps showing "not set yet", the most common cause is a PIN
   mismatch between the two phones — double check you both typed the same PIN.
-- To change the shared PIN later, clear Safari site data for the page (or tap "switch" then
-  clear localStorage) and re-enter a new PIN on both phones.
+- To change the shared PIN or switch identity later, tap the log out icon (top right) — this
+  clears the saved PIN and identity on that phone, so it'll ask for both again next time.
