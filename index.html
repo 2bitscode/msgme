@@ -65,6 +65,11 @@
       <div id="chat-thread" class="chat-thread">
         <p class="chat-empty" id="chat-empty">No messages yet this session.</p>
       </div>
+      <p id="typing-indicator" class="typing-indicator hidden">typing…</p>
+      <div id="reply-preview" class="reply-preview hidden">
+        <span id="reply-preview-text" class="reply-preview-text"></span>
+        <button id="reply-cancel" class="text-btn" aria-label="Cancel reply">✕</button>
+      </div>
       <div class="chat-input-row">
         <textarea id="msg-input" placeholder="Type a short message..." maxlength="300"></textarea>
         <button id="msg-send" class="btn primary">Send</button>

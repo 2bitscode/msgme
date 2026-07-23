@@ -14,6 +14,10 @@ async function sha256Hex(text) {
 
 function otherOf(id) { return id === "A" ? "B" : "A"; }
 
+function truncate(text, max) {
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
+
 function timeAgo(ts) {
   if (!ts) return "never";
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -30,7 +34,13 @@ let myIdentity = null;
 let statusListenerRef = null;
 let messageListenerRef = null;
 let seenListenerRef = null;
+let typingListenerRef = null;
 let lastMineMeta = null;
+let replyTarget = null;
+let lastTypingWriteAt = 0;
+let typingClearTimer = null;
+let typingHideTimer = null;
+const TYPING_STALE_MS = 5000;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -76,6 +86,7 @@ document.querySelectorAll(".identity-btn").forEach(btn => {
 });
 
 $("#logout-btn").addEventListener("click", () => {
+  setTypingFlag(false);
   detachListeners();
   localStorage.removeItem(LS_KEYS.identity);
   localStorage.removeItem(LS_KEYS.pin);
@@ -91,6 +102,7 @@ $("#logout-btn").addEventListener("click", () => {
 function resetChatThread() {
   $("#chat-thread").innerHTML = '<p class="chat-empty" id="chat-empty">No messages yet this session.</p>';
   lastMineMeta = null;
+  cancelReply();
 }
 
 function startApp(identity) {
@@ -162,13 +174,66 @@ function attachListeners() {
       lastMineMeta.textContent = clock + " · Seen";
     }
   });
+
+  // partner is typing, live
+  typingListenerRef = db.ref(`apps/${appPathHash}/typing/${mine}`);
+  typingListenerRef.on("value", snap => {
+    showTypingIndicator(snap.val());
+  });
 }
 
 function detachListeners() {
   if (statusListenerRef) statusListenerRef.off();
   if (messageListenerRef) messageListenerRef.off();
   if (seenListenerRef) seenListenerRef.off();
+  if (typingListenerRef) typingListenerRef.off();
+  clearTimeout(typingClearTimer);
+  clearTimeout(typingHideTimer);
+  $("#typing-indicator").classList.add("hidden");
 }
+
+// ---- Typing indicator ----
+function setTypingFlag(isTyping) {
+  if (!db) return;
+  const ref = db.ref(`apps/${appPathHash}/typing/${myIdentity}`);
+  if (isTyping) {
+    const now = Date.now();
+    if (now - lastTypingWriteAt < 2000) return;
+    lastTypingWriteAt = now;
+    ref.set(firebase.database.ServerValue.TIMESTAMP);
+    ref.onDisconnect().remove();
+  } else {
+    lastTypingWriteAt = 0;
+    ref.remove();
+  }
+}
+
+function showTypingIndicator(ts) {
+  const el = $("#typing-indicator");
+  clearTimeout(typingHideTimer);
+  const age = ts ? Date.now() - ts : Infinity;
+  if (ts && age < TYPING_STALE_MS) {
+    el.classList.remove("hidden");
+    typingHideTimer = setTimeout(() => el.classList.add("hidden"), TYPING_STALE_MS - age);
+  } else {
+    el.classList.add("hidden");
+  }
+}
+
+$("#msg-input").addEventListener("input", () => {
+  clearTimeout(typingClearTimer);
+  if ($("#msg-input").value.trim()) {
+    setTypingFlag(true);
+    typingClearTimer = setTimeout(() => setTypingFlag(false), 3000);
+  } else {
+    setTypingFlag(false);
+  }
+});
+
+$("#msg-input").addEventListener("blur", () => {
+  clearTimeout(typingClearTimer);
+  setTypingFlag(false);
+});
 
 function renderPartnerStatus(v) {
   const badge = $("#partner-badge");
@@ -194,12 +259,20 @@ setInterval(() => {
 }, 30000);
 
 // ---- Chat thread (session-only, nothing persisted after it's read) ----
-function appendChatBubble(text, who, ts) {
+function appendChatBubble(text, who, ts, replyTo) {
   const empty = $("#chat-empty");
   if (empty) empty.remove();
   const thread = $("#chat-thread");
   const bubble = document.createElement("div");
   bubble.className = "chat-bubble " + (who === "me" ? "mine" : "theirs");
+
+  if (replyTo) {
+    const quote = document.createElement("div");
+    quote.className = "quote-block";
+    quote.textContent = "↩ " + replyTo;
+    bubble.appendChild(quote);
+  }
+
   const p = document.createElement("p");
   p.className = "chat-text";
   p.textContent = text;
@@ -209,10 +282,27 @@ function appendChatBubble(text, who, ts) {
   meta.textContent = who === "me" ? (clock + " · Sent") : (clock + " · sent " + timeAgo(ts));
   bubble.appendChild(p);
   bubble.appendChild(meta);
+  bubble.addEventListener("click", () => setReplyTarget(text));
   thread.appendChild(bubble);
   thread.scrollTop = thread.scrollHeight;
   return { bubble, meta };
 }
+
+// ---- Reply-to ----
+function setReplyTarget(text) {
+  replyTarget = text;
+  $("#reply-preview-text").textContent = truncate(text, 80);
+  $("#reply-preview").classList.remove("hidden");
+  $("#msg-input").focus();
+}
+
+function cancelReply() {
+  replyTarget = null;
+  $("#reply-preview").classList.add("hidden");
+  $("#reply-preview-text").textContent = "";
+}
+
+$("#reply-cancel").addEventListener("click", cancelReply);
 
 // ---- Clearing chat ----
 $("#clear-chat").addEventListener("click", resetChatThread);
@@ -221,20 +311,25 @@ $("#clear-chat").addEventListener("click", resetChatThread);
 $("#msg-send").addEventListener("click", () => {
   const text = $("#msg-input").value.trim();
   if (!text) return;
+  clearTimeout(typingClearTimer);
+  setTypingFlag(false);
   const to = otherOf(myIdentity);
-  db.ref(`apps/${appPathHash}/messages/${to}`).set({
+  const payload = {
     text,
     from: myIdentity,
     ts: firebase.database.ServerValue.TIMESTAMP,
-  });
-  const { meta } = appendChatBubble(text, "me", Date.now());
+  };
+  if (replyTarget) payload.replyTo = truncate(replyTarget, 80);
+  db.ref(`apps/${appPathHash}/messages/${to}`).set(payload);
+  const { meta } = appendChatBubble(text, "me", Date.now(), payload.replyTo);
   lastMineMeta = meta;
   $("#msg-input").value = "";
+  cancelReply();
 });
 
 // ---- Receiving messages ----
 function showIncomingMessage(v) {
-  appendChatBubble(v.text, "them", v.ts);
+  appendChatBubble(v.text, "them", v.ts, v.replyTo);
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   // not stored server-side: clear it from the database now that it's been shown
   db.ref(`apps/${appPathHash}/messages/${myIdentity}`).remove();
