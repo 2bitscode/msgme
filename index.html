@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0f14">
+<title>BuddyStatus</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- PIN gate -->
+<section id="pin-screen" class="screen">
+  <div class="card">
+    <h1>BuddyStatus</h1>
+    <p class="sub">Enter the shared PIN to continue</p>
+    <input id="pin-input" type="tel" inputmode="numeric" autocomplete="off" placeholder="PIN" maxlength="12">
+    <button id="pin-submit" class="btn primary">Unlock</button>
+    <p id="pin-error" class="error"></p>
+  </div>
+</section>
+
+<!-- Identity pick (first run only) -->
+<section id="identity-screen" class="screen hidden">
+  <div class="card">
+    <h1>Who are you?</h1>
+    <p class="sub">This is remembered on this phone only</p>
+    <button class="btn identity-btn" data-id="A">Person A</button>
+    <button class="btn identity-btn" data-id="B">Person B</button>
+  </div>
+</section>
+
+<!-- Main app -->
+<section id="main-screen" class="screen hidden">
+  <header class="topbar">
+    <span id="me-label" class="me-label"></span>
+    <span class="topbar-actions">
+      <button id="switch-identity" class="link-btn">switch</button>
+      <button id="logout-btn" class="link-btn logout">log out</button>
+    </span>
+  </header>
+
+  <div class="content">
+
+    <div class="panel">
+      <h2>Your status</h2>
+      <div id="status-options" class="status-grid"></div>
+    </div>
+
+    <div class="panel partner-panel">
+      <h2 id="partner-title">Partner's status</h2>
+      <div id="partner-status" class="partner-status">
+        <span id="partner-badge" class="badge">—</span>
+        <span id="partner-updated" class="updated">not connected yet</span>
+      </div>
+    </div>
+
+    <div class="panel chat-panel">
+      <h2>Emergency messages</h2>
+      <div id="chat-thread" class="chat-thread">
+        <p class="chat-empty" id="chat-empty">No messages yet this session.</p>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="msg-input" placeholder="Type a short message..." maxlength="300"></textarea>
+        <button id="msg-send" class="btn primary">Send</button>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
