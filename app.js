@@ -4,7 +4,7 @@ const STATUS_OPTIONS = [
   { id: "no_msg", label: "No msg", color: "#ef4444" },
 ];
 
-const LS_KEYS = { pin: "msgme_pin", identity: "msgme_identity" };
+const LS_KEYS = { pin: "msgme_pin", identity: "msgme_identity", sound: "msgme_sound_enabled" };
 
 // ---- Helpers ----
 async function sha256Hex(text) {
@@ -35,14 +35,61 @@ let statusListenerRef = null;
 let messageListenerRef = null;
 let seenListenerRef = null;
 let typingListenerRef = null;
+let connListenerRef = null;
 let lastMineMeta = null;
 let replyTarget = null;
 let lastTypingWriteAt = 0;
 let typingClearTimer = null;
 let typingHideTimer = null;
+let appLabelText = "U2U";
+let unreadCount = 0;
+let soundEnabled = localStorage.getItem(LS_KEYS.sound) === "1";
+let audioCtx = null;
 const TYPING_STALE_MS = 5000;
 
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    unreadCount = 0;
+    document.title = appLabelText;
+  }
+});
+
 const $ = (sel) => document.querySelector(sel);
+
+// ---- Notification sound (foreground only, off by default) ----
+function updateSoundIcon() {
+  $("#sound-icon-on").classList.toggle("hidden", !soundEnabled);
+  $("#sound-icon-off").classList.toggle("hidden", soundEnabled);
+  $("#sound-toggle").title = soundEnabled ? "Sound on" : "Sound off";
+}
+
+function playNotificationSound() {
+  if (!soundEnabled) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  if (!audioCtx) audioCtx = new Ctx();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 880;
+  gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.35);
+}
+
+$("#sound-toggle").addEventListener("click", () => {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem(LS_KEYS.sound, soundEnabled ? "1" : "0");
+  updateSoundIcon();
+  if (soundEnabled) playNotificationSound(); // also unlocks audio on iOS via this tap
+});
+
+updateSoundIcon();
 
 // ---- Screens ----
 function showScreen(id) {
@@ -95,6 +142,9 @@ $("#logout-btn").addEventListener("click", () => {
   appPathHash = null;
   $("#pin-input").value = "";
   $("#pin-error").textContent = "";
+  unreadCount = 0;
+  appLabelText = "U2U";
+  document.title = appLabelText;
   showScreen("#pin-screen");
 });
 
@@ -105,9 +155,16 @@ function resetChatThread() {
   cancelReply();
 }
 
+function shortId(id) { return id === "A" ? "U1" : "U2"; }
+
 function startApp(identity) {
   myIdentity = identity;
-  $("#me-tag").textContent = "Person " + identity;
+  $("#me-tag").textContent = shortId(identity);
+  const label = shortId(identity) + "→" + shortId(otherOf(identity));
+  appLabelText = label;
+  unreadCount = 0;
+  $("#app-label").textContent = label;
+  document.title = label;
   resetChatThread();
   buildStatusOptions();
   attachListeners();
@@ -158,11 +215,11 @@ function attachListeners() {
     renderPartnerStatus(v);
   });
 
-  // incoming messages, live
+  // incoming messages, live (queued, oldest first — replays unread backlog on login)
   messageListenerRef = db.ref(`apps/${appPathHash}/messages/${myIdentity}`);
-  messageListenerRef.on("value", snap => {
+  messageListenerRef.on("child_added", snap => {
     const v = snap.val();
-    if (v && v.text) showIncomingMessage(v);
+    if (v && (v.text || v.imageData)) showIncomingMessage(v, snap.key);
   });
 
   // partner has seen my last message, live
@@ -180,6 +237,19 @@ function attachListeners() {
   typingListenerRef.on("value", snap => {
     showTypingIndicator(snap.val());
   });
+
+  // connection state, live
+  connListenerRef = firebase.database().ref(".info/connected");
+  connListenerRef.on("value", snap => {
+    setConnDot(snap.val() === true);
+  });
+}
+
+function setConnDot(isOnline) {
+  const dot = $("#conn-dot");
+  dot.classList.toggle("online", isOnline);
+  dot.classList.toggle("offline", !isOnline);
+  dot.title = isOnline ? "Live" : "Reconnecting…";
 }
 
 function detachListeners() {
@@ -187,9 +257,11 @@ function detachListeners() {
   if (messageListenerRef) messageListenerRef.off();
   if (seenListenerRef) seenListenerRef.off();
   if (typingListenerRef) typingListenerRef.off();
+  if (connListenerRef) connListenerRef.off();
   clearTimeout(typingClearTimer);
   clearTimeout(typingHideTimer);
   $("#typing-indicator").classList.add("hidden");
+  setConnDot(false);
 }
 
 // ---- Typing indicator ----
@@ -259,7 +331,7 @@ setInterval(() => {
 }, 30000);
 
 // ---- Chat thread (session-only, nothing persisted after it's read) ----
-function appendChatBubble(text, who, ts, replyTo) {
+function appendChatBubble(text, who, ts, replyTo, imageData, msgKey) {
   const empty = $("#chat-empty");
   if (empty) empty.remove();
   const thread = $("#chat-thread");
@@ -273,19 +345,56 @@ function appendChatBubble(text, who, ts, replyTo) {
     bubble.appendChild(quote);
   }
 
-  const p = document.createElement("p");
-  p.className = "chat-text";
-  p.textContent = text;
+  if (imageData) {
+    const img = document.createElement("img");
+    img.className = "chat-image";
+    img.src = imageData;
+    img.alt = "Photo";
+    bubble.appendChild(img);
+
+    const dl = document.createElement("a");
+    dl.className = "text-btn image-download-btn";
+    dl.textContent = "Download";
+    dl.href = imageData;
+    dl.download = `photo-${ts || Date.now()}.jpg`;
+    dl.addEventListener("click", (e) => e.stopPropagation());
+    bubble.appendChild(dl);
+  } else {
+    const p = document.createElement("p");
+    p.className = "chat-text";
+    p.textContent = text;
+    bubble.appendChild(p);
+  }
+
   const meta = document.createElement("span");
   meta.className = "chat-meta";
   const clock = new Date(ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   meta.textContent = who === "me" ? (clock + " · Sent") : (clock + " · sent " + timeAgo(ts));
-  bubble.appendChild(p);
   bubble.appendChild(meta);
-  bubble.addEventListener("click", () => setReplyTarget(text));
+
+  if (who === "me" && msgKey) {
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "text-btn bubble-delete-btn";
+    del.textContent = "Delete";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSentMessage(msgKey, bubble);
+    });
+    bubble.appendChild(del);
+  }
+
+  if (text) bubble.addEventListener("click", () => setReplyTarget(text));
   thread.appendChild(bubble);
   thread.scrollTop = thread.scrollHeight;
   return { bubble, meta };
+}
+
+// removes the message from the recipient's unread queue if they haven't opened it yet;
+// harmless no-op if they've already seen it (it's already gone from the database either way)
+function deleteSentMessage(key, bubbleEl) {
+  db.ref(`apps/${appPathHash}/messages/${otherOf(myIdentity)}/${key}`).remove();
+  bubbleEl.remove();
 }
 
 // ---- Reply-to ----
@@ -308,6 +417,8 @@ $("#reply-cancel").addEventListener("click", cancelReply);
 $("#clear-chat").addEventListener("click", resetChatThread);
 
 // ---- Sending messages ----
+const MAX_QUEUED_MESSAGES = 10;
+
 $("#msg-send").addEventListener("click", () => {
   const text = $("#msg-input").value.trim();
   if (!text) return;
@@ -320,19 +431,114 @@ $("#msg-send").addEventListener("click", () => {
     ts: firebase.database.ServerValue.TIMESTAMP,
   };
   if (replyTarget) payload.replyTo = truncate(replyTarget, 80);
-  db.ref(`apps/${appPathHash}/messages/${to}`).set(payload);
-  const { meta } = appendChatBubble(text, "me", Date.now(), payload.replyTo);
+  const msgsRef = db.ref(`apps/${appPathHash}/messages/${to}`);
+  const newRef = msgsRef.push(payload);
+  trimOldMessages(msgsRef);
+  const { meta } = appendChatBubble(text, "me", Date.now(), payload.replyTo, null, newRef.key);
   lastMineMeta = meta;
   $("#msg-input").value = "";
   cancelReply();
 });
 
+// keep only the most recent MAX_QUEUED_MESSAGES unread messages per recipient
+function trimOldMessages(msgsRef) {
+  msgsRef.once("value", snap => {
+    const keys = [];
+    snap.forEach(child => { keys.push(child.key); });
+    if (keys.length <= MAX_QUEUED_MESSAGES) return;
+    const updates = {};
+    keys.slice(0, keys.length - MAX_QUEUED_MESSAGES).forEach(k => { updates[k] = null; });
+    msgsRef.update(updates);
+  });
+}
+
+// ---- Sending photos ----
+const IMAGE_MAX_DIMENSION = 900;
+const IMAGE_QUALITY = 0.6;
+
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > IMAGE_MAX_DIMENSION || height > IMAGE_MAX_DIMENSION) {
+          if (width > height) {
+            height = Math.round(height * IMAGE_MAX_DIMENSION / width);
+            width = IMAGE_MAX_DIMENSION;
+          } else {
+            width = Math.round(width * IMAGE_MAX_DIMENSION / height);
+            height = IMAGE_MAX_DIMENSION;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", IMAGE_QUALITY));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+$("#image-pick-btn").addEventListener("click", () => $("#image-input").click());
+
+$("#image-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !file.type.startsWith("image/")) return;
+  let dataUrl;
+  try {
+    dataUrl = await compressImageFile(file);
+  } catch (err) {
+    console.error("Failed to process image", err);
+    return;
+  }
+  const to = otherOf(myIdentity);
+  const payload = {
+    type: "image",
+    imageData: dataUrl,
+    from: myIdentity,
+    ts: firebase.database.ServerValue.TIMESTAMP,
+  };
+  const msgsRef = db.ref(`apps/${appPathHash}/messages/${to}`);
+  const newRef = msgsRef.push(payload);
+  trimOldMessages(msgsRef);
+  const { meta } = appendChatBubble(null, "me", Date.now(), null, dataUrl, newRef.key);
+  lastMineMeta = meta;
+});
+
 // ---- Receiving messages ----
-function showIncomingMessage(v) {
-  appendChatBubble(v.text, "them", v.ts, v.replyTo);
+function flashChatPanel() {
+  const panel = $(".chat-panel");
+  panel.classList.remove("flash");
+  void panel.offsetWidth; // restart animation if already mid-flash
+  panel.classList.add("flash");
+}
+
+function bumpUnreadTitle() {
+  if (!document.hidden) return;
+  unreadCount++;
+  document.title = `(${unreadCount}) ${appLabelText}`;
+}
+
+function showIncomingMessage(v, key) {
+  if (v.type === "image") {
+    appendChatBubble(null, "them", v.ts, null, v.imageData);
+  } else {
+    appendChatBubble(v.text, "them", v.ts, v.replyTo);
+  }
+  flashChatPanel();
+  bumpUnreadTitle();
+  playNotificationSound();
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   // not stored server-side: clear it from the database now that it's been shown
-  db.ref(`apps/${appPathHash}/messages/${myIdentity}`).remove();
+  db.ref(`apps/${appPathHash}/messages/${myIdentity}/${key}`).remove();
   // let the sender know their message has been seen
   db.ref(`apps/${appPathHash}/seen/${myIdentity}`).set({
     ts: firebase.database.ServerValue.TIMESTAMP,

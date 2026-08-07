@@ -1,4 +1,4 @@
-# MsgMe
+# U2U
 
 A tiny 2-person status + emergency-message web app. No build step — plain HTML/CSS/JS,
 hosted for free on GitHub Pages. Live sync is powered by Firebase Realtime Database (free tier).
@@ -46,7 +46,7 @@ you copied above.
 cd msgme_web
 git init
 git add .
-git commit -m "Initial MsgMe app"
+git commit -m "Initial U2U app"
 git branch -M main
 git remote add origin https://github.com/<your-username>/<repo-name>.git
 git push -u origin main
@@ -60,7 +60,7 @@ Your app will be live at `https://<your-username>.github.io/<repo-name>/`.
 1. Open the GitHub Pages URL in Safari.
 2. Enter the shared PIN (agree on one number with the other person beforehand — it must match
    **exactly** on both phones, or you'll each be looking at a different empty "room").
-3. Pick "Person A" or "Person B" (remembered on that phone from then on).
+3. Pick "U1" or "U2" (remembered on that phone from then on).
 4. Optional but recommended: tap the Share icon -> **Add to Home Screen** so it opens full-screen
    like an app.
 
@@ -72,3 +72,6 @@ Your app will be live at `https://<your-username>.github.io/<repo-name>/`.
   mismatch between the two phones — double check you both typed the same PIN.
 - To change the shared PIN or switch identity later, tap the log out icon (top right) — this
   clears the saved PIN and identity on that phone, so it'll ask for both again next time.
+- Up to the last 10 unread messages are queued per person; they're replayed in order the next
+  time that person opens the app, and each is deleted from the database once shown. If more
+  than 10 pile up before it's opened, the oldest ones are dropped.

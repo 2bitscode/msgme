@@ -116,10 +116,40 @@ textarea { min-height: 90px; resize: vertical; font-family: inherit; }
   top: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+
+.app-id {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.app-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sub);
+  letter-spacing: 0.02em;
+}
+
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sub);
+  transition: background-color 0.2s;
+}
+
+.conn-dot.online { background: var(--green); }
+.conn-dot.offline { background: var(--danger); }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .icon-btn {
@@ -155,18 +185,29 @@ textarea { min-height: 90px; resize: vertical; font-family: inherit; }
 
 .compact-panel { padding: 12px 14px; margin-bottom: 10px; }
 
+.status-row { display: flex; gap: 12px; }
+
+.status-col { flex: 1; min-width: 0; }
+
+.status-col h2 { margin-bottom: 6px; }
+
+.status-col + .status-col {
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 
 .status-option {
-  border-radius: 12px;
-  padding: 10px 10px;
+  border-radius: 10px;
+  padding: 8px 6px;
   text-align: center;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 12px;
   border: 2px solid var(--border);
   background: var(--bg);
   color: var(--opt-color, var(--text));
@@ -180,25 +221,44 @@ textarea { min-height: 90px; resize: vertical; font-family: inherit; }
   color: #fff;
 }
 
-.partner-panel { text-align: center; }
+.status-option.selected::before {
+  content: "✓ ";
+  font-weight: 800;
+}
 
-.partner-status { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.partner-col { text-align: center; }
+
+.partner-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+}
 
 .badge {
   display: inline-block;
-  padding: 6px 16px;
+  padding: 5px 14px;
   border-radius: 999px;
   font-weight: 800;
-  font-size: 15px;
+  font-size: 13px;
   color: white;
   background: var(--sub);
 }
 
-.updated { color: var(--sub); font-size: 12px; }
+.updated { color: var(--sub); font-size: 11px; }
 
 .sent-note { color: var(--green); font-size: 13px; margin: 0; }
 
 .chat-panel { display: flex; flex-direction: column; }
+
+@keyframes flash-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.55); border-color: var(--accent); }
+  70% { box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); border-color: var(--accent); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.chat-panel.flash { animation: flash-pulse 0.7s ease-out; }
 
 .chat-thread {
   display: flex;
@@ -273,6 +333,43 @@ textarea { min-height: 90px; resize: vertical; font-family: inherit; }
 .chat-text { margin: 0 0 4px; word-wrap: break-word; white-space: pre-wrap; }
 .chat-meta { display: block; font-size: 11px; opacity: 0.7; text-align: right; }
 
+.bubble-delete-btn {
+  display: block;
+  margin: 2px 0 0 auto;
+  font-size: 11px;
+  color: white;
+  opacity: 0.8;
+}
+
+.chat-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 10px;
+  margin-bottom: 4px;
+}
+
+.image-download-btn {
+  display: inline-block;
+  margin-bottom: 4px;
+  text-decoration: none;
+}
+
+.chat-bubble.theirs .image-download-btn { color: var(--accent); }
+.chat-bubble.mine .image-download-btn { color: white; text-decoration: underline; }
+
 .chat-input-row { display: flex; flex-direction: column; }
 .chat-input-row textarea { min-height: 60px; margin-bottom: 8px; }
 .chat-input-row .btn { margin-bottom: 0; }
+
+.chat-input-actions { display: flex; align-items: center; gap: 8px; }
+.chat-input-actions .btn.primary { flex: 1; }
+
+.btn.icon-only {
+  flex: 0 0 auto;
+  width: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

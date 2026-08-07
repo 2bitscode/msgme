@@ -1,6 +1,6 @@
 {
-  "name": "MsgMe",
-  "short_name": "MsgMe",
+  "name": "U2U",
+  "short_name": "U2U",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0b0f14",
