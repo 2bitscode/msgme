@@ -257,7 +257,12 @@ function attachListeners() {
   // how many of my sent messages partner still hasn't read (still queued in their inbox), live
   partnerUnreadListenerRef = db.ref(`apps/${appPathHash}/messages/${mine}`);
   partnerUnreadListenerRef.on("value", snap => {
-    renderPartnerUnread(snap.numChildren());
+    let count = 0;
+    snap.forEach(child => {
+      const v = child.val();
+      if (v && (v.text || v.imageData)) count++;
+    });
+    renderPartnerUnread(count);
   });
 
   // rehydrate my own sent-but-still-unread bubbles into the thread on login (oldest first)
