@@ -260,6 +260,16 @@ function attachListeners() {
     renderPartnerUnread(snap.numChildren());
   });
 
+  // rehydrate my own sent-but-still-unread bubbles into the thread on login (oldest first)
+  db.ref(`apps/${appPathHash}/messages/${mine}`).once("value", snap => {
+    snap.forEach(child => {
+      const v = child.val();
+      if (!v || (!v.text && !v.imageData)) return;
+      const { meta } = appendChatBubble(v.text || null, "me", v.ts, v.replyTo || null, v.imageData || null, child.key);
+      lastMineMeta = meta;
+    });
+  });
+
   // partner is typing, live
   typingListenerRef = db.ref(`apps/${appPathHash}/typing/${mine}`);
   typingListenerRef.on("value", snap => {
