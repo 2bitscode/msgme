@@ -36,6 +36,10 @@ let messageListenerRef = null;
 let seenListenerRef = null;
 let typingListenerRef = null;
 let connListenerRef = null;
+let partnerLastLoginListenerRef = null;
+let partnerLastLoginTs = null;
+let partnerLastReadTs = null;
+let partnerUnreadListenerRef = null;
 let lastMineMeta = null;
 let replyTarget = null;
 let lastTypingWriteAt = 0;
@@ -145,6 +149,11 @@ $("#logout-btn").addEventListener("click", () => {
   unreadCount = 0;
   appLabelText = "U2U";
   document.title = appLabelText;
+  partnerLastLoginTs = null;
+  partnerLastReadTs = null;
+  $("#partner-last-login").textContent = "last login: never";
+  $("#partner-last-read").textContent = "last read: never";
+  $("#partner-unread").textContent = "unread: 0";
   showScreen("#pin-screen");
 });
 
@@ -168,6 +177,7 @@ function startApp(identity) {
   resetChatThread();
   buildStatusOptions();
   attachListeners();
+  db.ref(`apps/${appPathHash}/lastLogin/${myIdentity}`).set(firebase.database.ServerValue.TIMESTAMP);
   showScreen("#main-screen");
 }
 
@@ -222,14 +232,32 @@ function attachListeners() {
     if (v && (v.text || v.imageData)) showIncomingMessage(v, snap.key);
   });
 
-  // partner has seen my last message, live
+  // partner has seen my last message, live (also drives the persistent "last read" line)
   seenListenerRef = db.ref(`apps/${appPathHash}/seen/${mine}`);
   seenListenerRef.on("value", snap => {
     const v = snap.val();
-    if (v && v.ts && lastMineMeta) {
-      const clock = new Date(v.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      lastMineMeta.textContent = clock + " · Seen";
+    if (v && v.ts) {
+      partnerLastReadTs = v.ts;
+      renderPartnerLastRead();
+      if (lastMineMeta) {
+        const seenClock = new Date(v.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const sentText = lastMineMeta.dataset.sentText || lastMineMeta.textContent;
+        lastMineMeta.textContent = sentText + " · Seen " + seenClock;
+      }
     }
+  });
+
+  // partner's last login time, live
+  partnerLastLoginListenerRef = db.ref(`apps/${appPathHash}/lastLogin/${mine}`);
+  partnerLastLoginListenerRef.on("value", snap => {
+    partnerLastLoginTs = snap.val();
+    renderPartnerLastLogin();
+  });
+
+  // how many of my sent messages partner still hasn't read (still queued in their inbox), live
+  partnerUnreadListenerRef = db.ref(`apps/${appPathHash}/messages/${mine}`);
+  partnerUnreadListenerRef.on("value", snap => {
+    renderPartnerUnread(snap.numChildren());
   });
 
   // partner is typing, live
@@ -256,6 +284,8 @@ function detachListeners() {
   if (statusListenerRef) statusListenerRef.off();
   if (messageListenerRef) messageListenerRef.off();
   if (seenListenerRef) seenListenerRef.off();
+  if (partnerLastLoginListenerRef) partnerLastLoginListenerRef.off();
+  if (partnerUnreadListenerRef) partnerUnreadListenerRef.off();
   if (typingListenerRef) typingListenerRef.off();
   if (connListenerRef) connListenerRef.off();
   clearTimeout(typingClearTimer);
@@ -322,11 +352,27 @@ function renderPartnerStatus(v) {
   updated.textContent = "updated " + timeAgo(v.ts);
 }
 
-// keep "updated X ago" fresh
+function renderPartnerLastLogin() {
+  $("#partner-last-login").textContent = "last login: " + timeAgo(partnerLastLoginTs);
+}
+
+function renderPartnerLastRead() {
+  $("#partner-last-read").textContent = "last read: " + timeAgo(partnerLastReadTs);
+}
+
+function renderPartnerUnread(count) {
+  $("#partner-unread").textContent = count > 0 ? `unread: ${count}` : "unread: 0";
+}
+
+// keep "updated X ago" / "last login" / "last read" fresh
 setInterval(() => {
   const badge = $("#partner-badge");
   if (db && myIdentity && badge && badge.textContent !== "—") {
     db.ref(`apps/${appPathHash}/status/${otherOf(myIdentity)}`).once("value", s => renderPartnerStatus(s.val()));
+  }
+  if (db && myIdentity) {
+    renderPartnerLastLogin();
+    renderPartnerLastRead();
   }
 }, 30000);
 
@@ -370,6 +416,7 @@ function appendChatBubble(text, who, ts, replyTo, imageData, msgKey) {
   meta.className = "chat-meta";
   const clock = new Date(ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   meta.textContent = who === "me" ? (clock + " · Sent") : (clock + " · sent " + timeAgo(ts));
+  if (who === "me") meta.dataset.sentText = meta.textContent;
   bubble.appendChild(meta);
 
   if (who === "me" && msgKey) {
