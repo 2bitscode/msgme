@@ -248,6 +248,8 @@ textarea { min-height: 90px; resize: vertical; font-family: inherit; }
 
 .updated { color: var(--sub); font-size: 11px; }
 
+.app-version { color: var(--sub); font-size: 11px; opacity: 0.6; }
+
 .sent-note { color: var(--green); font-size: 13px; margin: 0; }
 
 .chat-panel { display: flex; flex-direction: column; }

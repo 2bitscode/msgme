@@ -6,6 +6,12 @@ const STATUS_OPTIONS = [
 
 const LS_KEYS = { pin: "msgme_pin", identity: "msgme_identity", sound: "msgme_sound_enabled" };
 
+const APP_VERSION = "8";
+
+// when false, sent-but-still-unread messages are not replayed as bubbles on the sender's
+// next login (sender just sees the "unread: N" count card instead of stale bubbles)
+const SHOW_UNREAD_SENT_BUBBLES = false;
+
 // ---- Helpers ----
 async function sha256Hex(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -49,16 +55,43 @@ let appLabelText = "U2U";
 let unreadCount = 0;
 let soundEnabled = localStorage.getItem(LS_KEYS.sound) === "1";
 let audioCtx = null;
+let pendingSeenMark = false;
 const TYPING_STALE_MS = 5000;
+
+// "seen" must only be reported once the user has actually looked at the window —
+// an open-but-unfocused/backgrounded tab should not tell the sender it's been read
+function isWindowActive() {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
+function markSeen() {
+  if (!db || !myIdentity) return;
+  db.ref(`apps/${appPathHash}/seen/${myIdentity}`).set({
+    ts: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+
+function maybeMarkSeen() {
+  if (pendingSeenMark && isWindowActive()) {
+    pendingSeenMark = false;
+    markSeen();
+  }
+}
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     unreadCount = 0;
     document.title = appLabelText;
   }
+  maybeMarkSeen();
 });
 
+window.addEventListener("focus", maybeMarkSeen);
+
 const $ = (sel) => document.querySelector(sel);
+
+$("#app-version").textContent = "v" + APP_VERSION;
+$("#app-version-main").textContent = "v" + APP_VERSION;
 
 // ---- Notification sound (foreground only, off by default) ----
 function updateSoundIcon() {
@@ -147,6 +180,7 @@ $("#logout-btn").addEventListener("click", () => {
   $("#pin-input").value = "";
   $("#pin-error").textContent = "";
   unreadCount = 0;
+  pendingSeenMark = false;
   appLabelText = "U2U";
   document.title = appLabelText;
   partnerLastLoginTs = null;
@@ -172,6 +206,7 @@ function startApp(identity) {
   const label = shortId(identity) + "→" + shortId(otherOf(identity));
   appLabelText = label;
   unreadCount = 0;
+  pendingSeenMark = false;
   $("#app-label").textContent = label;
   document.title = label;
   resetChatThread();
@@ -266,14 +301,16 @@ function attachListeners() {
   });
 
   // rehydrate my own sent-but-still-unread bubbles into the thread on login (oldest first)
-  db.ref(`apps/${appPathHash}/messages/${mine}`).once("value", snap => {
-    snap.forEach(child => {
-      const v = child.val();
-      if (!v || (!v.text && !v.imageData)) return;
-      const { meta } = appendChatBubble(v.text || null, "me", v.ts, v.replyTo || null, v.imageData || null, child.key);
-      lastMineMeta = meta;
+  if (SHOW_UNREAD_SENT_BUBBLES) {
+    db.ref(`apps/${appPathHash}/messages/${mine}`).once("value", snap => {
+      snap.forEach(child => {
+        const v = child.val();
+        if (!v || (!v.text && !v.imageData)) return;
+        const { meta } = appendChatBubble(v.text || null, "me", v.ts, v.replyTo || null, v.imageData || null, child.key);
+        lastMineMeta = meta;
+      });
     });
-  });
+  }
 
   // partner is typing, live
   typingListenerRef = db.ref(`apps/${appPathHash}/typing/${mine}`);
@@ -601,10 +638,13 @@ function showIncomingMessage(v, key) {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   // not stored server-side: clear it from the database now that it's been shown
   db.ref(`apps/${appPathHash}/messages/${myIdentity}/${key}`).remove();
-  // let the sender know their message has been seen
-  db.ref(`apps/${appPathHash}/seen/${myIdentity}`).set({
-    ts: firebase.database.ServerValue.TIMESTAMP,
-  });
+  // let the sender know their message has been seen — but only once the window is
+  // actually visible and focused; otherwise queue it for the next focus/visibility event
+  if (isWindowActive()) {
+    markSeen();
+  } else {
+    pendingSeenMark = true;
+  }
 }
 
 // ---- Boot ----
